@@ -42,8 +42,12 @@ def _build_mcp() -> FastMCP:
       - requires bearer auth on the MCP endpoint
     """
     settings = load_settings()
+    # stateless_http=True: every request is self-contained; no server-side
+    # session table. Required on Flex Consumption because consecutive MCP
+    # calls (initialize -> tools/list -> tools/call) routinely land on
+    # different workers, and per-process session_ids vanish between hops.
     if not settings.oauth.is_configured():
-        return FastMCP("nep-pricing")
+        return FastMCP("nep-pricing", stateless_http=True)
 
     from .oauth import MicrosoftBrokerProvider
 
@@ -66,6 +70,7 @@ def _build_mcp() -> FastMCP:
         "nep-pricing",
         auth_server_provider=provider,
         auth=auth_settings,
+        stateless_http=True,
     )
     # Stash the provider so build_app() can register the Microsoft callback route.
     mcp_app._nep_oauth_provider = provider  # type: ignore[attr-defined]

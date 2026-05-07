@@ -141,7 +141,7 @@ class MicrosoftBrokerProvider(OAuthAuthorizationServerProvider):
         if client is None:
             raise ValueError(f"Client {pending.client_id} no longer registered")
 
-        store.codes[our_code] = AuthorizationCode(
+        auth_code = AuthorizationCode(
             code=our_code,
             scopes=pending.requested_scopes or ["mcp.access"],
             expires_at=time.time() + AUTH_CODE_TTL_SECONDS,
@@ -151,9 +151,12 @@ class MicrosoftBrokerProvider(OAuthAuthorizationServerProvider):
             redirect_uri_provided_explicitly=pending.redirect_uri_provided_explicitly,
             resource=pending.resource,
         )
-        # Stash user identity keyed by code so token exchange can embed it.
-        store.codes[our_code]._user_email = user_email   # type: ignore[attr-defined]
-        store.codes[our_code]._user_name = user_name     # type: ignore[attr-defined]
+        # Persist auth code + user identity together so /token can read both
+        # off whichever worker handles the exchange.
+        payload = auth_code.model_dump(mode="json")
+        payload["_user_email"] = user_email
+        payload["_user_name"] = user_name
+        store.codes[our_code] = payload
 
         return construct_redirect_uri(
             pending.redirect_uri,
@@ -165,15 +168,17 @@ class MicrosoftBrokerProvider(OAuthAuthorizationServerProvider):
     async def load_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> AuthorizationCode | None:
-        code = store.codes.get(authorization_code)
-        if code is None:
+        code_row = store.codes.get(authorization_code)
+        if code_row is None:
             return None
-        if code.client_id != client.client_id:
+        if code_row.client_id != client.client_id:
             return None
-        if code.expires_at < time.time():
+        if code_row.expires_at < time.time():
             store.codes.pop(authorization_code, None)
             return None
-        return code
+        # Return the underlying AuthorizationCode (FastMCP types it strictly);
+        # the user-identity attrs are re-fetched via store.codes.pop below.
+        return code_row._auth_code
 
     async def exchange_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode

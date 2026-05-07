@@ -1,9 +1,10 @@
 """Azure Functions entry point — wraps the FastMCP ASGI app.
 
-The MCP streamable-http transport is a Starlette app; Azure Functions for
-Python (v2 model) supports ASGI directly via AsgiMiddleware. We attach the
-API-key middleware in front, then forward every request under /mcp/* to the
-ASGI app.
+Uses ``AsgiFunctionApp`` (azure-functions >= 1.18) instead of the older
+``AsgiMiddleware``. ``AsgiFunctionApp`` runs the ASGI lifespan protocol,
+which is required because MCP's streamable-http session manager starts
+its task group inside its lifespan handler — without that, every request
+500s with "Task group is not initialized."
 
 App settings expected in Azure (or local.settings.json for `func start`):
     NEP_API_KEY   - required in production; protects every request
@@ -33,14 +34,4 @@ _asgi_app = build_app()
 install_auth(_asgi_app, _settings.api_key)
 
 
-app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
-
-
-@app.function_name(name="mcp_endpoint")
-@app.route(
-    route="{*path}",
-    methods=[func.HttpMethod.GET, func.HttpMethod.POST, func.HttpMethod.DELETE],
-)
-async def mcp_endpoint(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
-    """Forward every HTTP method under the function root to the MCP ASGI app."""
-    return await func.AsgiMiddleware(_asgi_app).handle_async(req, context)
+app = func.AsgiFunctionApp(app=_asgi_app, http_auth_level=func.AuthLevel.ANONYMOUS)

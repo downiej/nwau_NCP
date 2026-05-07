@@ -193,7 +193,23 @@ def _eager_load() -> None:
     get_tables()
 
 
+def _apply_transport_security() -> None:
+    """Extend MCP's allowed-hosts list with values from env vars.
+
+    FastMCP defaults to 127.0.0.1 / localhost / [::1] only — anything else
+    (e.g. the *.azurewebsites.net hostname behind Functions) must be added
+    explicitly or every request comes back as 421 Misdirected Request.
+    """
+    settings = load_settings()
+    sec = mcp.settings.transport_security
+    if settings.allowed_hosts:
+        sec.allowed_hosts = list(sec.allowed_hosts) + list(settings.allowed_hosts)
+    if settings.allowed_origins:
+        sec.allowed_origins = list(sec.allowed_origins) + list(settings.allowed_origins)
+
+
 def build_app():
     """Return the Starlette ASGI app for HTTP transport (used by Azure Functions)."""
     _eager_load()
+    _apply_transport_security()
     return mcp.streamable_http_app()

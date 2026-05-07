@@ -24,7 +24,15 @@ class Settings:
     price_weights_path: Path
     api_key: str | None
     determination_year: str
+    allowed_hosts: tuple[str, ...]
+    allowed_origins: tuple[str, ...]
     server_name: str = "nep-pricing"
+
+
+def _split_csv(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(s.strip() for s in value.split(",") if s.strip())
 
 
 def load_settings() -> Settings:
@@ -35,6 +43,11 @@ def load_settings() -> Settings:
         ),
         api_key=os.environ.get("NEP_API_KEY") or None,
         determination_year=os.environ.get("NEP_YEAR", "2025-26"),
+        # Extra host headers the MCP transport will accept beyond the local
+        # defaults (127.0.0.1, localhost, [::1]). Set this to your Azure
+        # Functions hostname in production, e.g. "cove-nep-mcp.azurewebsites.net".
+        allowed_hosts=_split_csv(os.environ.get("NEP_ALLOWED_HOSTS")),
+        allowed_origins=_split_csv(os.environ.get("NEP_ALLOWED_ORIGINS")),
     )
 
 

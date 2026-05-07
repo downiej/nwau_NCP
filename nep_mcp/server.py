@@ -19,6 +19,8 @@ import logging
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from pydantic import AnyHttpUrl
 
 from .adjustments import parse_demographics
 from .config import load_settings
@@ -29,6 +31,45 @@ from .store import get_settings, get_tables
 
 
 log = logging.getLogger(__name__)
+
+
+def _build_mcp() -> FastMCP:
+    """Construct FastMCP, wiring the OAuth broker if configured.
+
+    With OAuth configured, FastMCP automatically:
+      - publishes /.well-known/oauth-authorization-server and /.well-known/oauth-protected-resource
+      - exposes /authorize, /token, /register
+      - requires bearer auth on the MCP endpoint
+    """
+    settings = load_settings()
+    if not settings.oauth.is_configured():
+        return FastMCP("nep-pricing")
+
+    from .oauth import MicrosoftBrokerProvider
+
+    provider = MicrosoftBrokerProvider(settings.oauth)
+
+    auth_settings = AuthSettings(
+        issuer_url=AnyHttpUrl(settings.oauth.issuer_url),
+        resource_server_url=AnyHttpUrl(settings.oauth.issuer_url),
+        required_scopes=["mcp.access"],
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=["mcp.access"],
+            default_scopes=["mcp.access"],
+        ),
+    )
+
+    # FastMCP uses provider.load_access_token as the token verifier when
+    # auth_server_provider is set; passing both is rejected.
+    mcp_app = FastMCP(
+        "nep-pricing",
+        auth_server_provider=provider,
+        auth=auth_settings,
+    )
+    # Stash the provider so build_app() can register the Microsoft callback route.
+    mcp_app._nep_oauth_provider = provider  # type: ignore[attr-defined]
+    return mcp_app
 
 Stream = Literal[
     "acute",
@@ -41,7 +82,9 @@ Stream = Literal[
 ]
 
 
-mcp = FastMCP("nep-pricing")
+# Build the FastMCP instance once at import time. With OAuth env vars set,
+# this wires the Microsoft broker; without them, falls back to no-auth (local dev).
+mcp = _build_mcp()
 
 
 def _validate_stream(stream: str) -> str:
@@ -212,4 +255,15 @@ def build_app():
     """Return the Starlette ASGI app for HTTP transport (used by Azure Functions)."""
     _eager_load()
     _apply_transport_security()
-    return mcp.streamable_http_app()
+    app = mcp.streamable_http_app()
+
+    # If OAuth is configured, attach the Microsoft -> us redirect leg.
+    provider = getattr(mcp, "_nep_oauth_provider", None)
+    if provider is not None:
+        from .oauth import register_microsoft_callback_route
+        register_microsoft_callback_route(app, provider)
+        log.info("OAuth broker active; Microsoft callback registered at /oauth/microsoft_callback")
+    else:
+        log.warning("OAuth not configured — server is unauthenticated.")
+
+    return app

@@ -19,6 +19,30 @@ DEFAULT_XLSX = PROJECT_ROOT / "price_weights" / "nep_2025_26_price_weights.xlsx"
 
 
 @dataclass(frozen=True)
+class OAuthConfig:
+    """Microsoft Entra ID broker config.
+
+    All four required fields must be present for OAuth to be active:
+        - tenant_id, client_id, client_secret: from the Entra app registration
+        - jwt_secret: HS256 signing key for the access/refresh tokens we mint
+    issuer_url and microsoft_redirect_uri are derived from the deployment URL.
+    """
+
+    tenant_id: str
+    client_id: str
+    client_secret: str
+    jwt_secret: str
+    issuer_url: str               # e.g. https://cove-nep-mcp.azurewebsites.net/
+    microsoft_redirect_uri: str   # e.g. https://cove-nep-mcp.azurewebsites.net/oauth/microsoft_callback
+
+    def is_configured(self) -> bool:
+        return all(
+            (self.tenant_id, self.client_id, self.client_secret, self.jwt_secret,
+             self.issuer_url, self.microsoft_redirect_uri)
+        )
+
+
+@dataclass(frozen=True)
 class Settings:
     nep_price: float
     price_weights_path: Path
@@ -26,6 +50,7 @@ class Settings:
     determination_year: str
     allowed_hosts: tuple[str, ...]
     allowed_origins: tuple[str, ...]
+    oauth: OAuthConfig
     server_name: str = "nep-pricing"
 
 
@@ -36,6 +61,7 @@ def _split_csv(value: str | None) -> tuple[str, ...]:
 
 
 def load_settings() -> Settings:
+    public_url = os.environ.get("NEP_PUBLIC_URL", "").rstrip("/") + "/"
     return Settings(
         nep_price=float(os.environ.get("NEP_PRICE", "7258")),
         price_weights_path=Path(
@@ -48,6 +74,14 @@ def load_settings() -> Settings:
         # Functions hostname in production, e.g. "cove-nep-mcp.azurewebsites.net".
         allowed_hosts=_split_csv(os.environ.get("NEP_ALLOWED_HOSTS")),
         allowed_origins=_split_csv(os.environ.get("NEP_ALLOWED_ORIGINS")),
+        oauth=OAuthConfig(
+            tenant_id=os.environ.get("NEP_OAUTH_TENANT_ID", ""),
+            client_id=os.environ.get("NEP_OAUTH_CLIENT_ID", ""),
+            client_secret=os.environ.get("NEP_OAUTH_CLIENT_SECRET", ""),
+            jwt_secret=os.environ.get("NEP_OAUTH_JWT_SECRET", ""),
+            issuer_url=public_url,
+            microsoft_redirect_uri=(public_url + "oauth/microsoft_callback") if public_url != "/" else "",
+        ),
     )
 
 

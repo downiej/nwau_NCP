@@ -22,6 +22,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from pydantic import AnyHttpUrl
 
+from . import branding
 from .adjustments import parse_demographics
 from .config import load_settings
 from .loader import iter_classifications
@@ -47,7 +48,7 @@ def _build_mcp() -> FastMCP:
     # calls (initialize -> tools/list -> tools/call) routinely land on
     # different workers, and per-process session_ids vanish between hops.
     if not settings.oauth.is_configured():
-        return FastMCP("nep-pricing", stateless_http=True)
+        return FastMCP("Cove · NEP Pricing", stateless_http=True)
 
     from .oauth import MicrosoftBrokerProvider
 
@@ -67,7 +68,7 @@ def _build_mcp() -> FastMCP:
     # FastMCP uses provider.load_access_token as the token verifier when
     # auth_server_provider is set; passing both is rejected.
     mcp_app = FastMCP(
-        "nep-pricing",
+        "Cove · NEP Pricing",
         auth_server_provider=provider,
         auth=auth_settings,
         stateless_http=True,
@@ -124,12 +125,14 @@ def get_nwau(
         contact_with_consumer: For mh_community only — was the consumer present
             at the contact? Defaults to True.
 
-    Returns the lookup metadata, base NWAU, demographic-adjusted NWAU, and
-    the multipliers applied.
+    Returns the lookup metadata, base NWAU, demographic-adjusted NWAU, the
+    multipliers applied, and a `display_markdown` field. **When showing the
+    answer to a user, render `display_markdown` directly** — it carries the
+    Cove Solutions branding and is the intended user-facing presentation.
     """
     s = _validate_stream(stream)
     demos = parse_demographics(demographics)
-    return compute_nwau(
+    result = compute_nwau(
         get_tables(),
         stream=s,
         code=classification_code,
@@ -137,6 +140,11 @@ def get_nwau(
         demographics=demos,
         contact_with_consumer=contact_with_consumer,
     )
+    if s == "mh_community":
+        result["display_markdown"] = branding.community_contact(result)
+    else:
+        result["display_markdown"] = branding.episode(result)
+    return result
 
 
 @mcp.tool()
@@ -149,20 +157,30 @@ def get_rate_dollars(
 ) -> dict[str, Any]:
     """Same call as get_nwau, but with AUD funding amounts at the configured NEP.
 
-    Returns base_dollars (NWAU * NEP) and adjusted_dollars (after demographics).
+    Returns base_dollars (NWAU * NEP), adjusted_dollars (after demographics),
+    and a `display_markdown` field. **When showing the answer to a user,
+    render `display_markdown` directly** — it carries the Cove Solutions
+    branding and is the intended user-facing presentation.
     """
     settings = get_settings()
-    result = get_nwau(
-        stream=stream,
-        classification_code=classification_code,
+    s = _validate_stream(stream)
+    demos = parse_demographics(demographics)
+    result = compute_nwau(
+        get_tables(),
+        stream=s,
+        code=classification_code,
         los=los,
-        demographics=demographics,
+        demographics=demos,
         contact_with_consumer=contact_with_consumer,
     )
     result["nep_price_aud"] = settings.nep_price
     result["determination_year"] = settings.determination_year
     result["base_dollars"] = compute_dollars(settings.nep_price, result["base_nwau"])
     result["adjusted_dollars"] = compute_dollars(settings.nep_price, result["adjusted_nwau"])
+    if s == "mh_community":
+        result["display_markdown"] = branding.community_contact(result)
+    else:
+        result["display_markdown"] = branding.episode(result)
     return result
 
 
@@ -183,11 +201,13 @@ def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
     by_care_type = average_daily_rate_by_care_type(tables, settings.nep_price)
 
     if care_type is None:
-        return {
+        result = {
             "nep_price_aud": settings.nep_price,
             "determination_year": settings.determination_year,
             "by_care_type": by_care_type,
         }
+        result["display_markdown"] = branding.average_daily_rate(result)
+        return result
 
     requested = care_type.strip().lower()
     match = next(
@@ -199,39 +219,63 @@ def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
             f"Unknown subacute care_type {care_type!r}. "
             f"Known: {sorted(by_care_type)}."
         )
-    return {
+    result = {
         "nep_price_aud": settings.nep_price,
         "determination_year": settings.determination_year,
         "care_type": match,
         **by_care_type[match],
     }
+    result["display_markdown"] = branding.average_daily_rate(result)
+    return result
 
 
 @mcp.tool()
 def list_classifications(stream: Stream) -> dict[str, Any]:
-    """List every classification code in a stream with its description."""
+    """List every classification code in a stream with its description.
+
+    Returns the full list plus a Cove-branded `display_markdown` preview of
+    the first 10 entries. **When showing the answer to a user, render
+    `display_markdown` directly.**
+    """
     s = _validate_stream(stream)
     items = [
         {"code": code, "description": desc}
         for code, desc in iter_classifications(get_tables(), s)
     ]
-    return {"stream": s, "count": len(items), "classifications": items}
+    return {
+        "stream": s,
+        "count": len(items),
+        "classifications": items,
+        "display_markdown": branding.classifications_summary(s, len(items), items),
+    }
 
 
 @mcp.tool()
 def search_classifications(stream: Stream, query: str) -> dict[str, Any]:
-    """Substring search over codes and descriptions in a stream (case-insensitive)."""
+    """Substring search over codes and descriptions in a stream (case-insensitive).
+
+    Returns matches plus a Cove-branded `display_markdown` summary. **When
+    showing the answer to a user, render `display_markdown` directly.**
+    """
     s = _validate_stream(stream)
     q = (query or "").strip().lower()
     if not q:
-        return {"stream": s, "query": q, "count": 0, "matches": []}
+        result = {"stream": s, "query": q, "count": 0, "matches": []}
+        result["display_markdown"] = branding.search_results(s, query or "", [])
+        return result
 
     matches = [
         {"code": code, "description": desc}
         for code, desc in iter_classifications(get_tables(), s)
         if q in code.lower() or q in (desc or "").lower()
     ]
-    return {"stream": s, "query": q, "count": len(matches), "matches": matches}
+    return {
+        "stream": s,
+        "query": q,
+        "count": len(matches),
+        "matches": matches,
+        "display_markdown": branding.search_results(s, query, matches),
+    }
 
 
 def _eager_load() -> None:

@@ -22,7 +22,11 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from pydantic import AnyHttpUrl
 
-from . import branding
+import json
+
+from mcp import types
+
+from . import branding, branding_html
 from .adjustments import parse_demographics
 from .config import load_settings
 from .loader import iter_classifications
@@ -102,6 +106,30 @@ def _validate_stream(stream: str) -> str:
     return s
 
 
+_UI_MIME = "text/html;profile=mcp-app"
+
+
+def _ui_response(structured: dict, html_card: str, uri: str) -> list:
+    """Wrap the structured result + Cove HTML card as MCP content blocks.
+
+    Two blocks: a TextContent of the JSON payload (so Claude can reason about
+    the numbers) and an EmbeddedResource carrying HTML with mime
+    ``text/html;profile=mcp-app`` (the MCP UI extension Claude renders inline
+    as a sandboxed branded card — paraphrase-proof).
+    """
+    return [
+        types.TextContent(type="text", text=json.dumps(structured, default=str)),
+        types.EmbeddedResource(
+            type="resource",
+            resource=types.TextResourceContents(
+                uri=uri,
+                mimeType=_UI_MIME,
+                text=html_card,
+            ),
+        ),
+    ]
+
+
 @mcp.tool()
 def get_nwau(
     stream: Stream,
@@ -142,9 +170,11 @@ def get_nwau(
     )
     if s == "mh_community":
         result["display_markdown"] = branding.community_contact(result)
+        html_card = branding_html.community_contact(result)
     else:
         result["display_markdown"] = branding.episode(result)
-    return result
+        html_card = branding_html.episode(result)
+    return _ui_response(result, html_card, f"ui://nep-pricing/{s}/{classification_code}")
 
 
 @mcp.tool()
@@ -179,9 +209,11 @@ def get_rate_dollars(
     result["adjusted_dollars"] = compute_dollars(settings.nep_price, result["adjusted_nwau"])
     if s == "mh_community":
         result["display_markdown"] = branding.community_contact(result)
+        html_card = branding_html.community_contact(result)
     else:
         result["display_markdown"] = branding.episode(result)
-    return result
+        html_card = branding_html.episode(result)
+    return _ui_response(result, html_card, f"ui://nep-pricing/{s}/{classification_code}")
 
 
 @mcp.tool()
@@ -207,7 +239,8 @@ def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
             "by_care_type": by_care_type,
         }
         result["display_markdown"] = branding.average_daily_rate(result)
-        return result
+        return _ui_response(result, branding_html.average_daily_rate(result),
+                            "ui://nep-pricing/subacute-daily-rates/all")
 
     requested = care_type.strip().lower()
     match = next(
@@ -226,7 +259,8 @@ def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
         **by_care_type[match],
     }
     result["display_markdown"] = branding.average_daily_rate(result)
-    return result
+    return _ui_response(result, branding_html.average_daily_rate(result),
+                        f"ui://nep-pricing/subacute-daily-rates/{match}")
 
 
 @mcp.tool()
@@ -242,12 +276,14 @@ def list_classifications(stream: Stream) -> dict[str, Any]:
         {"code": code, "description": desc}
         for code, desc in iter_classifications(get_tables(), s)
     ]
-    return {
+    result = {
         "stream": s,
         "count": len(items),
         "classifications": items,
         "display_markdown": branding.classifications_summary(s, len(items), items),
     }
+    return _ui_response(result, branding_html.classifications_summary(s, len(items), items),
+                        f"ui://nep-pricing/list/{s}")
 
 
 @mcp.tool()
@@ -262,20 +298,23 @@ def search_classifications(stream: Stream, query: str) -> dict[str, Any]:
     if not q:
         result = {"stream": s, "query": q, "count": 0, "matches": []}
         result["display_markdown"] = branding.search_results(s, query or "", [])
-        return result
+        return _ui_response(result, branding_html.search_results(s, query or "", []),
+                            f"ui://nep-pricing/search/{s}/empty")
 
     matches = [
         {"code": code, "description": desc}
         for code, desc in iter_classifications(get_tables(), s)
         if q in code.lower() or q in (desc or "").lower()
     ]
-    return {
+    result = {
         "stream": s,
         "query": q,
         "count": len(matches),
         "matches": matches,
         "display_markdown": branding.search_results(s, query, matches),
     }
+    return _ui_response(result, branding_html.search_results(s, query, matches),
+                        f"ui://nep-pricing/search/{s}/{q}")
 
 
 def _eager_load() -> None:

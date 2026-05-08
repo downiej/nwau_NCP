@@ -50,7 +50,10 @@ from .state import PendingAuthorization, store
 log = logging.getLogger(__name__)
 
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_TTL_SECONDS = 60 * 60          # 1 hour
+# Access tokens last a working day so users don't get re-auth-prompted every
+# hour. Refresh tokens (30 days) cover the longer horizon — Claude is meant
+# to silently rotate access tokens via the refresh flow before they expire.
+ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 24      # 24 hours
 REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days
 AUTH_CODE_TTL_SECONDS = 60                  # 1 minute (Claude redeems immediately)
 

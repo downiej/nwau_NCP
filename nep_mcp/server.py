@@ -130,7 +130,7 @@ def _ui_response(structured: dict, html_card: str, uri: str) -> list:
     ]
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def get_nwau(
     stream: Stream,
     classification_code: str,
@@ -177,7 +177,7 @@ def get_nwau(
     return _ui_response(result, html_card, f"ui://nep-pricing/{s}/{classification_code}")
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def get_rate_dollars(
     stream: Stream,
     classification_code: str,
@@ -216,7 +216,7 @@ def get_rate_dollars(
     return _ui_response(result, html_card, f"ui://nep-pricing/{s}/{classification_code}")
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
     """Average inlier $/day across AN-SNAP V5.0 subacute classifications.
 
@@ -263,7 +263,7 @@ def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
                         f"ui://nep-pricing/subacute-daily-rates/{match}")
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def list_classifications(stream: Stream) -> dict[str, Any]:
     """List every classification code in a stream with its description.
 
@@ -286,7 +286,7 @@ def list_classifications(stream: Stream) -> dict[str, Any]:
                         f"ui://nep-pricing/list/{s}")
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def search_classifications(stream: Stream, query: str) -> dict[str, Any]:
     """Substring search over codes and descriptions in a stream (case-insensitive).
 

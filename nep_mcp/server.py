@@ -22,11 +22,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from pydantic import AnyHttpUrl
 
+import base64
 import json
 
 from mcp import types
 
-from . import branding, branding_html
+from . import branding, branding_html, branding_png
 from .adjustments import parse_demographics
 from .config import load_settings
 from .loader import iter_classifications
@@ -109,15 +110,22 @@ def _validate_stream(stream: str) -> str:
 _UI_MIME = "text/html;profile=mcp-app"
 
 
-def _ui_response(structured: dict, html_card: str, uri: str) -> list:
-    """Wrap the structured result + Cove HTML card as MCP content blocks.
+def _ui_response(structured: dict, html_card: str, png_bytes: bytes, uri: str) -> list:
+    """Wrap the structured result + Cove branded artefacts as MCP content blocks.
 
-    Two blocks: a TextContent of the JSON payload (so Claude can reason about
-    the numbers) and an EmbeddedResource carrying HTML with mime
-    ``text/html;profile=mcp-app`` (the MCP UI extension Claude renders inline
-    as a sandboxed branded card — paraphrase-proof).
+    Three blocks, in priority order:
+      1. ImageContent (PNG) — the bulletproof brand artefact. Every MCP client
+         renders images verbatim, so Claude can never paraphrase the card.
+      2. TextContent (JSON) — the structured payload Claude reasons over.
+      3. EmbeddedResource (HTML) — the MCP UI extension; renders as an inline
+         interactive card in clients that honour the spec, ignored otherwise.
     """
     return [
+        types.ImageContent(
+            type="image",
+            data=base64.b64encode(png_bytes).decode("ascii"),
+            mimeType="image/png",
+        ),
         types.TextContent(type="text", text=json.dumps(structured, default=str)),
         types.EmbeddedResource(
             type="resource",
@@ -171,10 +179,12 @@ def get_nwau(
     if s == "mh_community":
         result["display_markdown"] = branding.community_contact(result)
         html_card = branding_html.community_contact(result)
+        png = branding_png.render_community_contact(result)
     else:
         result["display_markdown"] = branding.episode(result)
         html_card = branding_html.episode(result)
-    return _ui_response(result, html_card, f"ui://nep-pricing/{s}/{classification_code}")
+        png = branding_png.render_episode(result)
+    return _ui_response(result, html_card, png, f"ui://nep-pricing/{s}/{classification_code}")
 
 
 @mcp.tool(structured_output=False)
@@ -210,10 +220,12 @@ def get_rate_dollars(
     if s == "mh_community":
         result["display_markdown"] = branding.community_contact(result)
         html_card = branding_html.community_contact(result)
+        png = branding_png.render_community_contact(result)
     else:
         result["display_markdown"] = branding.episode(result)
         html_card = branding_html.episode(result)
-    return _ui_response(result, html_card, f"ui://nep-pricing/{s}/{classification_code}")
+        png = branding_png.render_episode(result)
+    return _ui_response(result, html_card, png, f"ui://nep-pricing/{s}/{classification_code}")
 
 
 @mcp.tool(structured_output=False)
@@ -240,6 +252,7 @@ def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
         }
         result["display_markdown"] = branding.average_daily_rate(result)
         return _ui_response(result, branding_html.average_daily_rate(result),
+                            branding_png.render_average_daily_rate(result),
                             "ui://nep-pricing/subacute-daily-rates/all")
 
     requested = care_type.strip().lower()
@@ -260,6 +273,7 @@ def get_average_daily_rate(care_type: str | None = None) -> dict[str, Any]:
     }
     result["display_markdown"] = branding.average_daily_rate(result)
     return _ui_response(result, branding_html.average_daily_rate(result),
+                        branding_png.render_average_daily_rate(result),
                         f"ui://nep-pricing/subacute-daily-rates/{match}")
 
 
@@ -283,6 +297,7 @@ def list_classifications(stream: Stream) -> dict[str, Any]:
         "display_markdown": branding.classifications_summary(s, len(items), items),
     }
     return _ui_response(result, branding_html.classifications_summary(s, len(items), items),
+                        branding_png.render_classifications_summary(s, len(items), items),
                         f"ui://nep-pricing/list/{s}")
 
 
@@ -299,6 +314,7 @@ def search_classifications(stream: Stream, query: str) -> dict[str, Any]:
         result = {"stream": s, "query": q, "count": 0, "matches": []}
         result["display_markdown"] = branding.search_results(s, query or "", [])
         return _ui_response(result, branding_html.search_results(s, query or "", []),
+                            branding_png.render_search_results(s, query or "", []),
                             f"ui://nep-pricing/search/{s}/empty")
 
     matches = [
@@ -314,6 +330,7 @@ def search_classifications(stream: Stream, query: str) -> dict[str, Any]:
         "display_markdown": branding.search_results(s, query, matches),
     }
     return _ui_response(result, branding_html.search_results(s, query, matches),
+                        branding_png.render_search_results(s, query, matches),
                         f"ui://nep-pricing/search/{s}/{q}")
 
 

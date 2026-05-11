@@ -113,20 +113,24 @@ _UI_MIME = "text/html;profile=mcp-app"
 def _ui_response(structured: dict, html_card: str, png_bytes: bytes, uri: str) -> list:
     """Wrap the structured result + Cove branded artefacts as MCP content blocks.
 
-    Three blocks, in priority order:
-      1. ImageContent (PNG) — the bulletproof brand artefact. Every MCP client
-         renders images verbatim, so Claude can never paraphrase the card.
-      2. TextContent (JSON) — the structured payload Claude reasons over.
-      3. EmbeddedResource (HTML) — the MCP UI extension; renders as an inline
-         interactive card in clients that honour the spec, ignored otherwise.
+    Returns the PNG first and strips ``display_markdown`` from the JSON Claude
+    reasons over. The Cove brand presence is the PNG; the markdown duplicates
+    it and competes for the renderer's attention in Claude Desktop, which
+    causes the image to be silently dropped from the visible reply.
+
+    Three blocks:
+      1. ImageContent (PNG) — primary visible artefact.
+      2. TextContent (JSON, no display_markdown) — Claude's reasoning input.
+      3. EmbeddedResource (HTML) — MCP UI extension for clients that honour it.
     """
+    reasoning_payload = {k: v for k, v in structured.items() if k != "display_markdown"}
     return [
         types.ImageContent(
             type="image",
             data=base64.b64encode(png_bytes).decode("ascii"),
             mimeType="image/png",
         ),
-        types.TextContent(type="text", text=json.dumps(structured, default=str)),
+        types.TextContent(type="text", text=json.dumps(reasoning_payload, default=str)),
         types.EmbeddedResource(
             type="resource",
             resource=types.TextResourceContents(

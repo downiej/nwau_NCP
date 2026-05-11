@@ -13,8 +13,22 @@ Brand palette taken from the Cove Solutions logo:
 
 from __future__ import annotations
 
+import base64
 import html
+from pathlib import Path
 from typing import Any
+
+
+_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "cove_logo.jpg"
+_LOGO_DATA_URI: str | None = None
+
+
+def _logo_data_uri() -> str:
+    global _LOGO_DATA_URI
+    if _LOGO_DATA_URI is None and _LOGO_PATH.exists():
+        b = _LOGO_PATH.read_bytes()
+        _LOGO_DATA_URI = f"data:image/jpeg;base64,{base64.b64encode(b).decode('ascii')}"
+    return _LOGO_DATA_URI or ""
 
 
 COVE_NAVY = "#1a2e54"
@@ -48,31 +62,17 @@ _BASE_STYLE = f"""
     background: white;
   }}
   .header {{
-    background: var(--cove-navy);
-    color: white;
-    padding: 12px 20px;
+    background: white;
+    color: var(--cove-navy);
+    padding: 14px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    border-bottom: 3px solid var(--cove-teal);
   }}
-  .brand {{
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }}
-  .brand-mark {{
-    width: 22px; height: 28px;
-    border-radius: 4px;
-    background: linear-gradient(135deg, var(--cove-teal) 0%, var(--cove-teal) 35%, var(--cove-cream) 35%, var(--cove-cream) 70%, #d1d5db 70%);
-    border: 2px solid var(--cove-navy);
-    box-shadow: inset 0 0 0 1px white;
-    flex-shrink: 0;
-  }}
-  .header-label {{ font-size: 12px; color: var(--cove-cream); font-weight: 500; }}
+  .brand-logo {{ height: 44px; width: auto; display: block; }}
+  .header-label {{ font-size: 12px; color: var(--cove-muted); font-weight: 500; }}
   .body {{ padding: 22px 22px 18px; }}
   .hero {{ font-size: 34px; font-weight: 700; color: var(--cove-navy); margin: 0 0 4px; line-height: 1.1; }}
   .hero-secondary {{ font-size: 18px; font-weight: 500; color: var(--cove-muted); margin-left: 10px; }}
@@ -126,12 +126,17 @@ def _shell(title: str, body_html: str, footer: str | None = None) -> str:
     footer_html = (
         f'<div class="footer">{html.escape(footer)}</div>' if footer else ""
     )
+    logo_uri = _logo_data_uri()
+    logo_html = (
+        f'<img class="brand-logo" src="{logo_uri}" alt="Cove Solutions">'
+        if logo_uri else '<div style="font-weight:700;color:var(--cove-navy);letter-spacing:.08em">COVE SOLUTIONS</div>'
+    )
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{html.escape(title)}</title>
 <style>{_BASE_STYLE}</style></head>
 <body><div class="card">
 <div class="header">
-  <div class="brand"><span class="brand-mark"></span>COVE SOLUTIONS</div>
+  {logo_html}
   <div class="header-label">{html.escape(title)}</div>
 </div>
 <div class="body">{body_html}</div>

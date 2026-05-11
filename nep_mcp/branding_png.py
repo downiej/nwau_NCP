@@ -12,9 +12,30 @@ cover Azure Functions Linux (DejaVu), Windows (Segoe UI / Arial), and macOS.
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
+
+
+_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "cove_logo.jpg"
+_LOGO_CACHE: Image.Image | None = None
+
+
+def _logo(target_height: int) -> Image.Image | None:
+    """Return the Cove logo resized to the given height, preserving aspect.
+
+    Cached at module level so we only decode the JPG once per worker.
+    """
+    global _LOGO_CACHE
+    if _LOGO_CACHE is None:
+        if not _LOGO_PATH.exists():
+            return None
+        _LOGO_CACHE = Image.open(_LOGO_PATH).convert("RGB")
+    src = _LOGO_CACHE
+    ratio = target_height / src.height
+    target_w = int(src.width * ratio)
+    return src.resize((target_w, target_height), Image.LANCZOS)
 
 
 COVE_NAVY = (26, 46, 84)
@@ -86,41 +107,38 @@ def _truncate(text: str, max_chars: int) -> str:
 
 
 # --------------------------------------------------------- Card scaffolding
-HEADER_H = 50
+HEADER_H = 70                  # white band with the real logo
+ACCENT_H = 3                   # thin teal divider under the header
 FOOTER_H = 32
 PAD_X = 22
+LOGO_HEIGHT = 44               # the logo lives inside the white header band
 
 SOURCE = "Source: IHACPA NEP Determination 2025-26 · Computed by Cove Solutions"
 
 
 def _draw_card_chrome(W: int, H: int, header_label: str) -> tuple[Image.Image, ImageDraw.ImageDraw]:
-    """Draws the navy header band and grey footer; returns canvas + draw."""
+    """White header with the actual Cove logo, teal accent divider, grey footer."""
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
     # Outer border
     d.rectangle([(0, 0), (W - 1, H - 1)], outline=COVE_BORDER, width=1)
 
-    # Header
-    d.rectangle([(1, 1), (W - 2, HEADER_H)], fill=COVE_NAVY)
+    # ---- Header band (white, with real logo)
+    logo_img = _logo(LOGO_HEIGHT)
+    if logo_img is not None:
+        logo_y = (HEADER_H - LOGO_HEIGHT) // 2
+        img.paste(logo_img, (PAD_X, logo_y))
 
-    # Brand mark (a small teal/cream/grey block as a logo-ish glyph)
-    mark_x, mark_y, mark_w, mark_h = PAD_X - 4, 12, 24, 28
-    d.rectangle([(mark_x, mark_y), (mark_x + mark_w, mark_y + mark_h)], fill=WHITE)
-    d.rectangle([(mark_x + 2, mark_y + 2), (mark_x + mark_w // 3, mark_y + mark_h - 2)], fill=COVE_TEAL)
-    d.rectangle([(mark_x + mark_w // 3, mark_y + 2), (mark_x + 2 * mark_w // 3, mark_y + mark_h - 2)], fill=COVE_CREAM)
-    d.rectangle([(mark_x + 2 * mark_w // 3, mark_y + 2), (mark_x + mark_w - 2, mark_y + mark_h - 2)], fill=(200, 205, 215))
-    d.rectangle([(mark_x, mark_y), (mark_x + mark_w, mark_y + mark_h)], outline=COVE_NAVY, width=2)
-
-    brand_x = mark_x + mark_w + 10
-    d.text((brand_x, 18), "COVE SOLUTIONS", font=_font(13, bold=True), fill=WHITE)
-
-    # Header label (right-aligned)
-    label_font = _font(11)
+    # Header label (right-aligned, muted text)
+    label_font = _font(12)
     label_w = _text_width(d, header_label, label_font)
-    d.text((W - PAD_X - label_w, 20), header_label, font=label_font, fill=COVE_CREAM)
+    d.text((W - PAD_X - label_w, (HEADER_H - 16) // 2), header_label, font=label_font, fill=COVE_MUTED)
 
-    # Footer
+    # ---- Thin teal accent divider under the header
+    d.rectangle([(1, HEADER_H), (W - 2, HEADER_H + ACCENT_H)], fill=COVE_TEAL)
+
+    # ---- Footer
     d.rectangle([(1, H - FOOTER_H), (W - 2, H - 1)], fill=COVE_GREY)
     d.line([(1, H - FOOTER_H), (W - 2, H - FOOTER_H)], fill=COVE_BORDER, width=1)
     d.text((PAD_X - 4, H - FOOTER_H + 11), SOURCE, font=_font(10), fill=COVE_MUTED)
